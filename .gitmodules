@@ -1,0 +1,7 @@
+[submodule "public"]
+	path = public
+	url = https://github.com/QDucasse/qducasse.github.io.git
+	branch = main
+[submodule "themes/yinyang"]
+	path = themes/yinyang
+	url = git@github.com:joway/hugo-theme-yinyang.git

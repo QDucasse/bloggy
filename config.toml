@@ -1,0 +1,23 @@
+baseurl = "https://qducasse.github.io"
+title = "Lectern"
+languagecode = "en"
+DefaultContentLanguage = "en"
+theme = "yinyang"
+
+
+[author]
+  name = "Quentin Ducasse"
+
+[params]
+  headTitle= "Lectern"
+  description= "Notes and Memos, Quentin DUCASSE"
+  mainSections = ["posts"]
+  css = ["css/custom.css"]
+
+[[params.socials]]
+  name = "Github"
+  link = "https://github.com/QDucasse"
+
+[[params.socials]]
+  name = "Twitter"
+  link = "https://twitter.com/quentin_ducasse"
