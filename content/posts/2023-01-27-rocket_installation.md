@@ -105,14 +105,10 @@ $ git submodule update --init
 
 ### Building the simulator
 
-We can now build either the C simulator:
+We can now build the C simulator to run assembly and benchmarks tests (adding `-debug` generates the waveform), using `N` as the number of cores:
 ```bash
-$ cd emulator # C sim
+$ cd emulator
 $ make
-```
-
-To run assembly and benchmarks tests (adding `-debug` generates the waveform), using `N` as the number of cores:
-```bash
 $ make -jN run-asm-tests
 $ make -jN run-bmark-tests
 $ make -jN run-asm-tests-debug # With waveforms

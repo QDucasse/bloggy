@@ -1,6 +1,6 @@
 ---
 title: "Rocket unit tests"
-date: "2023-02-02"
+date: "2023-02-01"
 tags: [
     "riscv",
     "rocket"
