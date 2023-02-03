@@ -138,6 +138,7 @@ Reading the dump, we can look at our "fake" instruction:
 $ cat custom-p-unknown.dump
 custom-p-unknown:     file format elf64-littleriscv
 
+
 Disassembly of section .text.init:
 
 0000000080000000 <_start>:
@@ -206,16 +207,17 @@ Disassembly of section .text.init:
     800000d8:	f66290e3          	bne	t0,t1,80000038 <handle_exception>
     800000dc:	30005073          	csrwi	mstatus,0
     800000e0:	00000297          	auipc	t0,0x0
-    800000e4:	01428293          	addi	t0,t0,20 # 800000f4 <reset_vector+0xac>
+    800000e4:	01428293          	addi	t0,t0,20 # 800000f4 <test_2>
     800000e8:	34129073          	csrw	mepc,t0
     800000ec:	f1402573          	csrr	a0,mhartid
     800000f0:	30200073          	mret
-    800000f4:	0ff0000f          	fence
-    800000f8:	00100193          	li	gp,1
-    800000fc:	00000073          	ecall
-    80000100:	c0001073          	unimp
-    80000104:	0000                	unimp
-    80000106:	0000                	unimp
+
+00000000800000f4 <test_2>:
+    800000f4:	0002a00b          	0x2a00b
+    800000f8:	0ff0000f          	fence
+    800000fc:	00100193          	li	gp,1
+    80000100:	00000073          	ecall
+    80000104:	c0001073          	unimp
     80000108:	0000                	unimp
     8000010a:	0000                	unimp
     8000010c:	0000                	unimp
@@ -241,8 +243,7 @@ Disassembly of section .text.init:
     80000134:	0000                	unimp
     80000136:	0000                	unimp
     80000138:	0000                	unimp
-    8000013a:	0000                	unimp
-
+    8000013a:	0000                	unim
 ```
 
 TODO: Install the test
