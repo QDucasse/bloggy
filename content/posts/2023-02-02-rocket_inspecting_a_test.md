@@ -1,6 +1,6 @@
 ---
 title: "Rocket test macros"
-date: "2023-02-03"
+date: "2023-02-02"
 tags: [
     "riscv",
     "rocket"

@@ -1,6 +1,6 @@
 ---
 title: "Adding a unit test in Rocket"
-date: "2023-02-03"
+date: "2023-02-04"
 tags: [
     "riscv",
     "rocket"
