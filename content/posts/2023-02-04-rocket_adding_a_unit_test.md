@@ -126,7 +126,10 @@ endif
 ...
 ```
 
-We can now compile our test from the `isa` directory with :
+## Compiling our new test
+
+
+Once the new files/directories are created, we can now compile our test from the `isa` directory with :
 
 ```bash
 $ make custom-p-unknown.dump
@@ -213,7 +216,7 @@ Disassembly of section .text.init:
     800000f0:	30200073          	mret
 
 00000000800000f4 <test_2>:
-    800000f4:	0002a00b          	0x2a00b
+    800000f4:	0002a00b          	0x2a00b       # <<<== Our custom instruction!
     800000f8:	0ff0000f          	fence
     800000fc:	00100193          	li	gp,1
     80000100:	00000073          	ecall
@@ -243,8 +246,126 @@ Disassembly of section .text.init:
     80000134:	0000                	unimp
     80000136:	0000                	unimp
     80000138:	0000                	unimp
-    8000013a:	0000                	unim
+    8000013a:	0000                	unimp
 ```
 
-TODO: Install the test
-TODO: Test on the emulator
+## Installing our new test
+
+From the Rocket point of view, the test is fetched from the toolchain installation. Considering the toolchain is installed at `/opt/riscv-rocket/`, the binaries and dumps of each tests can be found in `/opt/riscv-rocket/riscv64-unknown-elf/share/riscv-tests/`.
+
+Since we need our test to be installed here as well so Rocket can use a symbolic link to reference it in the emulator. Running the following commands in the `riscv-tests` directory should be enough:
+```bash
+$ ./configure --prefix=$RISCV/riscv64-unknown-elf
+$ make install
+```
+
+The test and its should now show up in `$RISCV/riscv64-unknown-elf/share/riscv-tests/isa`!
+
+
+## Running the test on the emulator
+
+Going to the `rocket-chip` directory in the emulator, running `make output/custom-p-unknown.out` does not work at all, it builds the emulator and verilator then fails not finding a `makefile` rule...
+
+
+The issue comes form two distinct files where the `makefiles` are generated and the default test suite is defined. The first one is [`AddDefaultTests.scala`](https://github.com/chipsalliance/rocket-chip/blob/master/src/main/scala/stage/phases/AddDefaultTests.scala) from which we learn that the test environment is setup according to the test name and our custom test will not be found. Next, in [`RocketTestSuite.scala`](https://github.com/chipsalliance/rocket-chip/blob/master/src/main/scala/system/RocketTestSuite.scala), the tests suite and their corresponding `makefiles` are described. As an example, the `AssemblyTestSuite` extends the base `RocketTestSuite` with all information in its `toString` method:
+
+```scala
+abstract class RocketTestSuite {
+  val dir: String
+  val makeTargetName: String
+  val names: LinkedHashSet[String]
+  val envName: String
+  def kind: String
+  def postScript = s"""
+
+$$(addprefix $$(output_dir)/, $$(addsuffix .hex, $$($makeTargetName))): $$(output_dir)/%.hex: $dir/%.hex
+\tmkdir -p $$(output_dir)
+\tln -fs $$< $$@
+
+$$(addprefix $$(output_dir)/, $$($makeTargetName)): $$(output_dir)/%: $dir/%
+\tmkdir -p $$(output_dir)
+\tln -fs $$< $$@
+
+run-$makeTargetName: $$(addprefix $$(output_dir)/, $$(addsuffix .out, $$($makeTargetName)))
+\t@echo; perl -ne 'print "  [$$$$1] $$$$ARGV \\t$$$$2\\n" if( /\\*{3}(.{8})\\*{3}(.*)/ || /ASSERTION (FAILED):(.*)/i )' $$^ /dev/null | perl -pe 'BEGIN { $$$$failed = 0 } $$$$failed = 1 if(/FAILED/i); END { exit($$$$failed) }'
+
+run-$makeTargetName-debug: $$(addprefix $$(output_dir)/, $$(addsuffix .vpd, $$($makeTargetName)))
+\t@echo; perl -ne 'print "  [$$$$1] $$$$ARGV \\t$$$$2\\n" if( /\\*{3}(.{8})\\*{3}(.*)/ || /ASSERTION (FAILED):(.*)/i )' $$(patsubst %.vpd,%.out,$$^) /dev/null | perl -pe 'BEGIN { $$$$failed = 0 } $$$$failed = 1 if(/FAILED/i); END { exit($$$$failed) }'
+
+run-$makeTargetName-fst: $$(addprefix $$(output_dir)/, $$(addsuffix .fst, $$($makeTargetName)))
+\t@echo; perl -ne 'print "  [$$$$1] $$$$ARGV \\t$$$$2\\n" if( /\\*{3}(.{8})\\*{3}(.*)/ || /ASSERTION (FAILED):(.*)/i )' $$(patsubst %.fst,%.out,$$^) /dev/null | perl -pe 'BEGIN { $$$$failed = 0 } $$$$failed = 1 if(/FAILED/i); END { exit($$$$failed) }'
+"""
+}
+
+class AssemblyTestSuite(prefix: String, val names: LinkedHashSet[String])(val envName: String) extends RocketTestSuite {
+  val dir = "$(RISCV)/riscv64-unknown-elf/share/riscv-tests/isa"
+  val makeTargetName = prefix + "-" + envName + "-asm-tests"
+  def kind = "asm"
+  override def toString = s"$makeTargetName = \\\n" + names.map(n => s"\t$prefix-$envName-$n").mkString(" \\\n") + postScript
+}
+```
+
+At the end of the file, the name of the `DefaultTestSuites` are added by hand in their respective lists:
+
+```scala
+  val rv32uiNames = LinkedHashSet(
+    "simple", "add", "addi", "and", "andi", "auipc", "beq", "bge", "bgeu", "blt", "bltu", "bne", "fence_i",
+    "jal", "jalr", "lb", "lbu", "lh", "lhu", "lui", "lw", "or", "ori", "sb", "sh", "sw", "sll", "slli",
+    "slt", "slti", "sra", "srai", "srl", "srli", "sub", "xor", "xori")
+  val rv32ui = new AssemblyTestSuite("rv32ui", rv32uiNames)(_)
+
+  val rv32ucNames = LinkedHashSet("rvc")
+  val rv32uc = new AssemblyTestSuite("rv32uc", rv32ucNames)(_)
+
+  val rv32umNames = LinkedHashSet("mul", "mulh", "mulhsu", "mulhu", "div", "divu", "rem", "remu")
+  val rv32um = new AssemblyTestSuite("rv32um", rv32umNames)(_)
+  ...
+  val rv64uc = new AssemblyTestSuite("rv64uc", rv64ucNames)(_)
+  ...
+  val rv64u = List(rv64ui, rv64um)
+  val rv64i = List(rv64ui, rv64si, rv64mi)
+  val rv64pi = List(rv64ui, rv64mi)
+```
+
+To make everything work this way, we need to move our custom test in the `rv64ui` folder, add it to the `Makefrag` and reinstall it... We also need to add the following lines to `RocketTestSuite.scala`, defining our test and adding it to the assembly suite:
+```scala
+...
+val rv64uiCustomNames = LinkedHashSet("custom")
+val rv64ui = new AssemblyTestSuite("rv64ui", rv32uiNames ++ rv64uiNames ++ rv64uiCustomNames)(_)
+...
+```
+
+Launching the emulator "runs" our new test! (fails on our undefined instruction but hey that's the point)
+
+```bash
+$ make output/r64ui-p-custom.out
+... ~ building rocket
+... ~ building verilator
+```
+
+Looking at the dump:
+```bash
+...
+C0:      10735 [1] pc=[00000000800000e0] W[r 5=00000000800000e0][1] R[r 0=0000000000000000] R[r 0=0000000000000000] inst=[00000297] auipc   t0, 0x0
+C0:      10736 [1] pc=[00000000800000e4] W[r 5=00000000800000f4][1] R[r 5=00000000800000e0] R[r 0=0000000000000000] inst=[01428293] addi    t0, t0, 20
+C0:      10737 [1] pc=[00000000800000e8] W[r 0=0000003f043f3390][1] R[r 5=00000000800000f4] R[r 0=0000000000000000] inst=[34129073] csrw    mepc, t0
+C0:      10738 [1] pc=[00000000800000ec] W[r10=0000000000000000][1] R[r 0=0000000000000000] R[r 0=0000000000000000] inst=[f1402573] csrr    a0, mhartid
+C0:      10739 [1] pc=[00000000800000f0] W[r 0=0000000000000000][0] R[r 0=0000000000000000] R[r 0=0000000000000000] inst=[30200073] mret
+C0:      10744 [0] pc=[00000000800000f4] W[r 0=0000000000000000][0] R[r 5=000000000002a00b] R[r 0=0000000000000000] inst=[0002a00b] custom0.rs1 (args unknown)
+C0:      10803 [1] pc=[0000000080000004] W[r30=0000000000000002][1] R[r 0=0000000000000000] R[r 0=0000000000000000] inst=[34202f73] csrr    t5, mcause
+C0:      10804 [1] pc=[0000000080000008] W[r31=0000000000000008][1] R[r 0=0000000000000000] R[r 0=0000000000000000] inst=[00800f93] li      t6, 8
+C0:      10806 [1] pc=[000000008000000c] W[r 0=0000000000000000][0] R[r30=0000000000000002] R[r31=0000000000000008] inst=[03ff0863] beq     t5, t6, pc + 48
+...
+C0:      32464 [1] pc=[0000000000000840] W[r 0=0000000000000000][0] R[r 0=0000000000000000] R[r 8=0000000000000000] inst=[10802423] sw      s0, 264(zero)
+C0:      32465 [1] pc=[0000000000000844] W[r 8=2c2eb378ce6af372][1] R[r 0=0000000000000000] R[r 0=0000000000000000] inst=[7b202473] csrr    s0, dscratch
+C0:      32466 [1] pc=[0000000000000848] W[r 0=0000000000000000][0] R[r 0=0000000000000000] R[r 0=0000000000000000] inst=[7b200073] dret
+C0:      32493 [1] pc=[0000000080000040] W[r 0=0000000000000000][0] R[r30=000000008000103c] R[r 3=0000000000000539] inst=[fc3f2223] sw      gp, -60(t5)
+C0:      32494 [1] pc=[0000000080000044] W[r 0=0000000080000048][1] R[r 0=0000000000000000] R[r 0=0000000000000000] inst=[ff9ff06f] j       pc - 0x8
+*** FAILED *** (tohost = 668)
+*** FAILED *** via dtm (code = 668, seed 1675659022) after 32804 cycles
+
+```
+
+Our instruction got executed!!
+
+> Note: Is this the correct way to do it? We probably would like to keep a separate structure for our custom tests, or simply generate them then pass them directly to the emulator? Eh, I thought unit tests meant simple reproducible tests that we can use to learn the workflow of Rocket but they are mainly validation tests
