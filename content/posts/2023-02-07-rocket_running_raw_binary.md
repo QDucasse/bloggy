@@ -40,10 +40,11 @@ A lot of command line arguments help customize the generated code. The ones we n
 - `-N` or `--nbelt` the number of JIT elements
 - `-R` or `--picratio` the methods/PICs ratio (0 means no PICs 1 means only PICs)
 - `-O` or `--out` the name of the output binary file
+- `-S` or `--metmaxsize` the maximum size of a method
 
-For now, let's use the defaults ones and generate the code using:
+For now, let's generate a small binary with 2 methods of max size 5 instructions, no PICs, and a small gap between the interpretation loop and the JIT code by using:
 ```bash
-$ python -m gigue
+$ python -m gigue -N 2 -S 5 -R 0 -I 0 -J 224
 ```
 
 The resulting binary is generated in `bin/out.bin`!
@@ -94,7 +95,7 @@ $ riscv64-unknown-elf-objcopy \
     -I binary \
     -O elf64-littleriscv \
     -B riscv \
-    out.bin out.elf
+    out.bin out.o
 ```
 
 Reading the file now with `readelf` shows us:
@@ -161,10 +162,10 @@ $ riscv64-unknown-elf-readelf -hS out.o | grep "Type:"
 
 Running it now launches the emulator for a bit, fails with an error and loops over `NULL` values:
 ```bash
-./emulator-freechips.rocketchip.system-freechips.rocketchip.system.DefaultConfig \
+$ ./emulator-freechips.rocketchip.system-freechips.rocketchip.system.DefaultConfig \
     +max-cycles=100000000 \
     +verbose \
-    path/to/out.o
+    gigue/bin/out.o
 ...
 C0:        240 [1] pc=[0000000000000828] W[r 8=0000000000000000][1] R[r 8=0000000000000002] R[r 0=0000000000000000] inst=[00147413] DASM(00147413)
 C0:        241 [1] pc=[000000000000082c] W[r 0=0000000000000000][0] R[r 8=0000000000000000] R[r 0=0000000000000000] inst=[00040863] DASM(00040863)
@@ -202,20 +203,110 @@ resources
     ├── encoding.h
     ├── syscalls.c
     ├── test.ld
+    ├── template.S
     └── util.h
 
 1 directory, 5 files
 ```
 
-Running `make` in the Gigue root repository should compile each file and link them together! However, since we are getting the raw binary file and forcing into an ELF file, the linker fails with:
-```bash
-$ make
-/opt/riscv-rocket/bin/riscv64-unknown-elf-objcopy -I binary -O elf64-littleriscv -B riscv --rename-section .data=.text bin/out.bin bin/out.o
-/opt/riscv-rocket/bin/riscv64-unknown-elf-gcc -static -nostdlib -nostartfiles -lm -lgcc -T resources/common/test.ld bin/out.o bin/syscalls.o bin/crt.o -o bin/out
-/opt/riscv-rocket/lib/gcc/riscv64-unknown-elf/7.2.0/../../../../riscv64-unknown-elf/bin/ld: bin/syscalls.o: can't link double-float modules with soft-float modules
-/opt/riscv-rocket/lib/gcc/riscv64-unknown-elf/7.2.0/../../../../riscv64-unknown-elf/bin/ld: failed to merge target specific data of file bin/syscalls.o
-/opt/riscv-rocket/lib/gcc/riscv64-unknown-elf/7.2.0/../../../../riscv64-unknown-elf/bin/ld: bin/crt.o: can't link double-float modules with soft-float modules
-/opt/riscv-rocket/lib/gcc/riscv64-unknown-elf/7.2.0/../../../../riscv64-unknown-elf/bin/ld: failed to merge target specific data of file bin/crt.o
-collect2: error: ld returned 1 exit status
-make: *** [Makefile:34: bin/out] Error 1
+Note that to add our raw binary in an ELF file, rather than using `objcopy`, we can use the assembly `.incbin` operator! We use a template assembly file that includes the raw binary and redefines the `main` function to call it then exit. Our `main` function will override the one defined in `syscalls` as it was defined with the `weak` adjective. This way, we use the following `template.S` file:
+```nasm
+.global gigue_start
+gigue_start:
+    .incbin "bin/out.bin"
+
+.global gigue_end
+gigue_end:
+
+.global gigue_size
+gigue_size:
+    .int gigue_end - gigue_start
+
+
+; .text.startup:
+    .global main
+main:
+    call gigue_start
+    j exit
 ```
+
+Running `make` in the Gigue root repository should compile each file and link them together! 
+```bash
+$ export RISCV=/path/to/toolchain
+$ make
+/opt/riscv-rocket/bin/riscv64-unknown-elf-gcc -Iresources/common -march=rv64gc -mabi=lp64d -DPREALLOCATE=1 -mcmodel=medany -static -std=gnu99 -O2 -ffast-math -fno-common -fno-builtin-printf resources/common/syscalls.c -c -o bin/syscalls.o 
+/opt/riscv-rocket/bin/riscv64-unknown-elf-gcc -Iresources/common -march=rv64gc -mabi=lp64d -DPREALLOCATE=1 -mcmodel=medany -static -std=gnu99 -O2 -ffast-math -fno-common -fno-builtin-printf resources/common/crt.S -c -o bin/crt.o 
+/opt/riscv-rocket/bin/riscv64-unknown-elf-gcc -Iresources/common -march=rv64gc -mabi=lp64d -DPREALLOCATE=1 -mcmodel=medany -static -std=gnu99 -O2 -ffast-math -fno-common -fno-builtin-printf resources/common/template.S -c -o bin/template.o 
+/opt/riscv-rocket/bin/riscv64-unknown-elf-gcc -static -nostdlib -nostartfiles -lm -lgcc -T resources/common/test.ld bin/syscalls.o bin/crt.o bin/template.o -o bin/out
+```
+
+We can also generate the dumps of the different binaries, `out.bin.dump` to look at the Gigue-generated binary (passed through `objcopy`) or `out.dump` to look at the complete executable dump:
+```bash
+$ make dump
+/opt/riscv-rocket/bin/riscv64-unknown-elf-objdump --disassemble-all --disassemble-zeroes --section=.text --section=.text.startup --section=.text.init --section=.data bin/out > bin/out.dump
+/opt/riscv-rocket/bin/riscv64-unknown-elf-objcopy -I binary -O elf64-littleriscv -B riscv --rename-section .data=.text bin/out.bin bin/out.bin.dump.temp
+/opt/riscv-rocket/bin/riscv64-unknown-elf-objdump --disassemble-all --disassemble-zeroes --section=.text --section=.text.startup --section=.text.init --section=.data bin/out.bin.dump.temp > bin/out.bin.dump
+rm bin/out.bin.dump.temp
+```
+
+
+## Running it back on Rocket
+
+Now retrying on Rocket, running the instructions through the spike disssembly this time and outputting the result in the `out.dis` file:
+```bash
+$ ./emulator-freechips.rocketchip.system-freechips.rocketchip.system.DefaultConfig \
+    +max-cycles=100000000 \
+    +verbose \
+    gigue/bin/out \
+    3>&1 1>&2 2>&3 | spike-dasm > gigue/bin/out.dis
+```
+
+
+Inpecting the disassembly output, our code has been executed!!!
+```
+C0:     133134 [1] pc=[0000000080002734] W[r 2=0000000080022a28][1] R[r 2=0000000080022a80] R[r 0=0000000000000000] inst=[fa810113] addi    sp, sp, -88
+C0:     133163 [1] pc=[0000000080002738] W[r 0=0000000000000000][0] R[r 2=0000000080022a28] R[r 8=0000000000000000] inst=[00813023] sd      s0, 0(sp)
+C0:     133164 [1] pc=[000000008000273c] W[r 0=0000000000000000][0] R[r 2=0000000080022a28] R[r 9=0000000000000000] inst=[00913423] sd      s1, 8(sp)
+C0:     133180 [1] pc=[0000000080002740] W[r 0=0000000000000000][0] R[r 2=0000000080022a28] R[r18=0000000080002b28] inst=[01213823] sd      s2, 16(sp)
+C0:     133197 [1] pc=[0000000080002744] W[r 0=0000000000000000][0] R[r 2=0000000080022a28] R[r19=0000000000000000] inst=[01313c23] sd      s3, 24(sp)
+C0:     133198 [1] pc=[0000000080002748] W[r 0=0000000000000000][0] R[r 2=0000000080022a28] R[r20=0000000000000001] inst=[03413023] sd      s4, 32(sp)
+C0:     133199 [1] pc=[000000008000274c] W[r 0=0000000000000000][0] R[r 2=0000000080022a28] R[r21=0000000080002b40] inst=[03513423] sd      s5, 40(sp)
+C0:     133200 [1] pc=[0000000080002750] W[r 0=0000000000000000][0] R[r 2=0000000080022a28] R[r22=0000000000000000] inst=[03613823] sd      s6, 48(sp)
+C0:     133201 [1] pc=[0000000080002754] W[r 0=0000000000000000][0] R[r 2=0000000080022a28] R[r23=0000000000000000] inst=[03713c23] sd      s7, 56(sp)
+C0:     133202 [1] pc=[0000000080002758] W[r 0=0000000000000000][0] R[r 2=0000000080022a28] R[r24=0000000000000000] inst=[05813023] sd      s8, 64(sp)
+C0:     133203 [1] pc=[000000008000275c] W[r 0=0000000000000000][0] R[r 2=0000000080022a28] R[r25=0000000000000000] inst=[05913423] sd      s9, 72(sp)
+C0:     133204 [1] pc=[0000000080002760] W[r 0=0000000000000000][0] R[r 2=0000000080022a28] R[r 1=0000000080002948] inst=[04113823] sd      ra, 80(sp)
+C0:     133205 [1] pc=[0000000080002764] W[r 1=0000000080002764][1] R[r 0=0000000000000000] R[r 0=0000000000000000] inst=[00000097] auipc   ra, 0x0
+C0:     133206 [1] pc=[0000000080002768] W[r 1=000000008000276c][1] R[r 1=0000000080002764] R[r 0=0000000000000000] inst=[0b0080e7] jalr    ra, ra, 176
+C0:     133244 [1] pc=[0000000080002814] W[r 2=0000000080022a10][1] R[r 2=0000000080022a28] R[r 0=0000000000000000] inst=[fe810113] addi    sp, sp, -24
+C0:     133245 [1] pc=[0000000080002818] W[r 0=0000000000000000][0] R[r 2=0000000080022a10] R[r 8=0000000000000000] inst=[00813023] sd      s0, 0(sp)
+C0:     133246 [1] pc=[000000008000281c] W[r 7=0000000000000000][0] R[r29=0000000000000000] R[r31=0000000000000000] inst=[03feb3b3] mulhu   t2, t4, t6
+C0:     133256 [1] pc=[0000000080002820] W[r 7=fffffffffffffd0c][1] R[r17=0000000000000000] R[r 0=0000000000000000] inst=[d0c8839b] addiw   t2, a7, -756
+C0:     133257 [1] pc=[0000000080002824] W[r10=0000000000000000][1] R[r 6=0000000000000000] R[r 0=0000000000000000] inst=[e8232513] slti    a0, t1, -382
+C0:     133258 [1] pc=[0000000080002828] W[r10=0000000000000000][1] R[r11=0000000000000000] R[r31=0000000000000000] inst=[01f5f533] and     a0, a1, t6
+C0:     133259 [1] pc=[000000008000282c] W[r 8=0000000000000000][1] R[r 2=0000000080022a10] R[r 0=0000000000000000] inst=[00013403] ld      s0, 0(sp)
+C0:     133260 [1] pc=[0000000080002830] W[r 2=0000000080022a28][1] R[r 2=0000000080022a10] R[r 0=0000000000000000] inst=[01810113] addi    sp, sp, 24
+C0:     133261 [1] pc=[0000000080002834] W[r 0=0000000080002838][1] R[r 1=000000008000276c] R[r 0=0000000000000000] inst=[00008067] ret
+C0:     133262 [1] pc=[000000008000276c] W[r 5=0000000000000001][1] R[r 0=0000000000000000] R[r 0=0000000000000000] inst=[00100293] li      t0, 1
+C0:     133263 [1] pc=[0000000080002770] W[r 1=0000000080002770][1] R[r 0=0000000000000000] R[r 0=0000000000000000] inst=[00000097] auipc   ra, 0x0
+C0:     133264 [1] pc=[0000000080002774] W[r 1=0000000080002778][1] R[r 1=0000000080002770] R[r 0=0000000000000000] inst=[0c8080e7] jalr    ra, ra, 200
+C0:     133268 [1] pc=[0000000080002838] W[r 6=0000000000000001][1] R[r 0=0000000000000000] R[r 0=0000000000000000] inst=[00100313] li      t1, 1
+C0:     133269 [1] pc=[000000008000283c] W[r 0=0000000000000000][0] R[r 6=0000000000000001] R[r 5=0000000000000001] inst=[00531463] bne     t1, t0, pc + 8
+C0:     133335 [1] pc=[0000000080002840] W[r 0=0000000080002844][1] R[r 0=0000000000000000] R[r 0=0000000000000000] inst=[01c0006f] j       pc + 0x1c
+C0:     133337 [1] pc=[000000008000285c] W[r 0=0000000080002860][1] R[r 1=0000000080002778] R[r 0=0000000000000000] inst=[00008067] ret
+C0:     133339 [1] pc=[0000000080002778] W[r 8=0000000000000000][1] R[r 2=0000000080022a28] R[r 0=0000000000000000] inst=[00013403] ld      s0, 0(sp)
+C0:     133340 [1] pc=[000000008000277c] W[r 9=0000000000000000][1] R[r 2=0000000080022a28] R[r 0=0000000000000000] inst=[00813483] ld      s1, 8(sp)
+C0:     133341 [1] pc=[0000000080002780] W[r18=0000000080002b28][1] R[r 2=0000000080022a28] R[r 0=0000000000000000] inst=[01013903] ld      s2, 16(sp)
+C0:     133342 [1] pc=[0000000080002784] W[r19=0000000000000000][1] R[r 2=0000000080022a28] R[r 0=0000000000000000] inst=[01813983] ld      s3, 24(sp)
+C0:     133343 [1] pc=[0000000080002788] W[r20=0000000000000001][1] R[r 2=0000000080022a28] R[r 0=0000000000000000] inst=[02013a03] ld      s4, 32(sp)
+C0:     133344 [1] pc=[000000008000278c] W[r21=0000000080002b40][1] R[r 2=0000000080022a28] R[r 0=0000000000000000] inst=[02813a83] ld      s5, 40(sp)
+C0:     133345 [1] pc=[0000000080002790] W[r22=0000000000000000][1] R[r 2=0000000080022a28] R[r 0=0000000000000000] inst=[03013b03] ld      s6, 48(sp)
+C0:     133346 [1] pc=[0000000080002794] W[r23=0000000000000000][1] R[r 2=0000000080022a28] R[r 0=0000000000000000] inst=[03813b83] ld      s7, 56(sp)
+C0:     133347 [1] pc=[0000000080002798] W[r24=0000000000000000][1] R[r 2=0000000080022a28] R[r 0=0000000000000000] inst=[04013c03] ld      s8, 64(sp)
+C0:     133348 [1] pc=[000000008000279c] W[r25=0000000000000000][1] R[r 2=0000000080022a28] R[r 0=0000000000000000] inst=[04813c83] ld      s9, 72(sp)
+C0:     133349 [1] pc=[00000000800027a0] W[r 1=0000000080002948][1] R[r 2=0000000080022a28] R[r 0=0000000000000000] inst=[05013083] ld      ra, 80(sp)
+C0:     133350 [1] pc=[00000000800027a4] W[r 2=0000000080022a80][1] R[r 2=0000000080022a28] R[r 0=0000000000000000] inst=[05810113] addi    sp, sp, 88
+C0:     133351 [1] pc=[00000000800027a8] W[r 0=00000000800027ac][1] R[r 1=0000000080002948] R[r 0=0000000000000000] inst=[00008067] ret
+```
+
+We can distinguish the interpretation loop prologue and epilogue (with `sd`/`ld`s), then the two JIT methods (ending with `ret`s)!

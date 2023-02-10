@@ -22,7 +22,7 @@ This means that all RISC-V tests are directly available in a compiled format wit
 
 First of all, `riscv-tests` implements two types of tests, either simple unit tests per instruction (modulo the TVM and environment) that are implemented through direct assembly and macros or benchmarks that depends on more complex C files. The first are located in the `riscv-tests/isa` directory while the latter are in `riscv-tests/benchmarks`
 
-The structure of the `isa` tests all use the [`test_macros.h`](https://github.com/riscv-software-src/riscv-tests/blob/master/isa/macros/scalar/test_macros.h) header that defines assembly stubs that can be used in the unit tests. Along with this file, each environment adds its `riscv_test.h` header and encodings defined in the [`riscv-test-env`](https://github.com/riscv/riscv-test-env) repository. Along with this environment are the linker scripts and eventual `vm` to simulate a virtual memory system.
+The structure of the `isa` tests all use the [`test_macros.h`](https://github.com/riscv-software-src/riscv-tests/blob/master/isa/macros/scalar/test_macros.h) header that defines assembly stubs that can be used in the unit tests. Along with this file, each environment adds its `riscv_test.h` header and encodings defined in the [`riscv-test-env`](https://github.com/riscv/riscv-test-env) repository. Along with this environment are the linker scripts and eventual `vm` to simulate a virtual memory system.<<<<<<<<>>>>>>>>
 
 Let's look at the `isa/rv64ui/simple.S` unit test:
 
