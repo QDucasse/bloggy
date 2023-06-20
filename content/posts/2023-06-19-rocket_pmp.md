@@ -1,5 +1,5 @@
 ---
-title: "Rocket chip structure"
+title: "Rocket MMU and PMP"
 date: "2023-06-19"
 tags: [
     "riscv",
